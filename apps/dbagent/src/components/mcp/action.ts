@@ -3,6 +3,7 @@
 import { getUserSessionDBAccess } from '~/lib/db/db';
 import {
   addUserMcpServerToDB,
+  deleteUserMcpServer,
   getUserMcpServer,
   getUserMcpServers,
   registerExternalMcpServer,
@@ -45,4 +46,9 @@ export async function actionRegisterExternalMcpServer(
 ): Promise<MCPServer> {
   const dbAccess = await getUserSessionDBAccess();
   return await registerExternalMcpServer(dbAccess, projectId, input);
+}
+
+export async function actionDeleteUserMcpServer(serverName: string, projectId: string): Promise<void> {
+  const dbAccess = await getUserSessionDBAccess();
+  return await deleteUserMcpServer(dbAccess, serverName, projectId);
 }

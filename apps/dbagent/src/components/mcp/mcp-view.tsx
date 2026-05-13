@@ -140,7 +140,7 @@ export function McpView({
                 {server.command} {(server.args ?? []).join(' ')}
               </div>
               <p className="text-muted-foreground mt-1 text-xs">
-                DATABASE_URL is automatically injected from this project&apos;s default connection.
+                DATABASE_URL and DATABASE_URI are automatically injected from this project&apos;s default connection.
               </p>
             </div>
           ) : (
@@ -170,7 +170,8 @@ export function McpView({
               <h3 className="font-semibold">Environment Variables</h3>
               <p className="text-muted-foreground mb-4 text-sm">
                 These variables are passed to the MCP server process.
-                {isExternalServer && ' DATABASE_URL is injected automatically — only override it here if needed.'}
+                {isExternalServer &&
+                  ' DATABASE_URL and DATABASE_URI are injected automatically — only override here if needed.'}
               </p>
               <div className="space-y-3">
                 {Object.entries(envVars).map(([key, value], index) => (

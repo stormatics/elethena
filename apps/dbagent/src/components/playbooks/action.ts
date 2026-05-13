@@ -49,7 +49,6 @@ export async function actionGeneratePlaybookContent(name: string, description: s
         content: prompt
       }
     ],
-    temperature: 0.2,
     maxTokens: 1000
   });
 

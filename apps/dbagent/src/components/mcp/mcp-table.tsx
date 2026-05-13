@@ -20,7 +20,7 @@ import {
   TooltipContent,
   TooltipTrigger
 } from '@xata.io/components';
-import { ChevronLeftIcon, ChevronRightIcon, PlusIcon } from 'lucide-react';
+import { ChevronLeftIcon, ChevronRightIcon, PlusIcon, Trash2Icon } from 'lucide-react';
 import Link from 'next/link';
 import { useParams, useRouter } from 'next/navigation';
 import { useEffect, useState } from 'react';
@@ -28,6 +28,7 @@ import { MCPServer } from '~/lib/db/schema';
 import {
   actionAddUserMcpServerToDB,
   actionCheckUserMcpServerExists,
+  actionDeleteUserMcpServer,
   actionGetUserMcpServer,
   actionRegisterExternalMcpServer,
   actionUpdateUserMcpServer
@@ -99,6 +100,18 @@ export function McpTable() {
     }
   };
 
+  const handleDelete = async (server: MCPServer) => {
+    if (!confirm(`Delete "${server.name}"? This cannot be undone.`)) return;
+    try {
+      await actionDeleteUserMcpServer(server.name, project);
+      toast.success(`Deleted "${server.name}".`);
+      await loadMcpServers();
+    } catch (error) {
+      console.error('Error deleting MCP server:', error);
+      toast.error('Failed to delete server.');
+    }
+  };
+
   const handleRegisterExternal = async () => {
     if (!extName.trim() || !extCommand.trim() || !extArgs.trim()) {
       toast.error('Name, command, and args are required.');
@@ -157,8 +170,8 @@ export function McpTable() {
         <div className="mb-6 space-y-3 rounded-lg border p-4">
           <h2 className="font-semibold">Register External MCP Server</h2>
           <p className="text-muted-foreground text-sm">
-            For non-Node.js servers (e.g. Python). DATABASE_URL is automatically injected from this project&apos;s
-            connection.
+            For non-Node.js servers (e.g. Python). DATABASE_URL and DATABASE_URI are automatically injected from this
+            project&apos;s connection.
           </p>
           <div className="grid grid-cols-3 gap-3">
             <div>
@@ -248,9 +261,16 @@ export function McpTable() {
                 <Switch checked={server.enabled} onCheckedChange={() => handleToggleEnabled(server)} />
               </TableCell>
               <TableCell>
-                <Button variant="outline" size="sm" onClick={() => router.push(getMcpServerUrl(server))}>
-                  Edit
-                </Button>
+                <div className="flex items-center gap-2">
+                  <Button variant="outline" size="sm" onClick={() => router.push(getMcpServerUrl(server))}>
+                    Edit
+                  </Button>
+                  {mcpServerInDb[server.name] && (
+                    <Button variant="outline" size="sm" onClick={() => handleDelete(server)}>
+                      <Trash2Icon className="h-4 w-4" />
+                    </Button>
+                  )}
+                </div>
               </TableCell>
             </TableRow>
           ))}

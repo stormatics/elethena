@@ -37,9 +37,10 @@ async function loadToolsFromServer(server: MCPServerInsert, connectionString?: s
       return {};
     }
 
-    // Auto-inject DATABASE_URL from project connection; explicit envVars override it
+    // Auto-inject DATABASE_URL and DATABASE_URI from project connection.
+    // Some MCP servers (e.g. postgres-mcp) use DATABASE_URI; explicit envVars override either.
     const env: Record<string, string> = {
-      ...(connectionString ? { DATABASE_URL: connectionString } : {}),
+      ...(connectionString ? { DATABASE_URL: connectionString, DATABASE_URI: connectionString } : {}),
       ...(server.envVars ?? {})
     };
 
