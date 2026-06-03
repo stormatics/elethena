@@ -2,7 +2,6 @@ import { tool, Tool } from 'ai';
 import { z } from 'zod';
 import { DBAccess } from '~/lib/db/db';
 import { getCustomPlaybookAndPlaybookTool, listCustomPlaybooksAndPlaybookTool } from '~/lib/tools/custom-playbooks';
-import { getPlaybook, listPlaybooks } from '~/lib/tools/playbooks';
 import { ToolsetGroup } from './types';
 
 export function getPlaybookToolset(dbAccess: DBAccess, projectId: string): Record<string, Tool> {
@@ -26,11 +25,6 @@ function playbookListTool(execute: () => Promise<string[]>): Tool {
     execute: async () => execute()
   });
 }
-
-export const builtinPlaybookToolset = {
-  getPlaybookTool: playbookFetchTool(async (name: string) => getPlaybook(name)),
-  listPlaybooksTool: playbookListTool(async () => listPlaybooks())
-};
 
 export class playbookTools implements ToolsetGroup {
   #dbAccess: DBAccess;

@@ -20,6 +20,7 @@ type RunModelPlaybookParams = {
   playbook: string;
   additionalInstructions?: string;
   project: Project;
+  dbAccess: DBAccess;
 };
 
 async function runModelPlaybook({
@@ -29,7 +30,8 @@ async function runModelPlaybook({
   schedule,
   playbook,
   additionalInstructions,
-  project
+  project,
+  dbAccess
 }: RunModelPlaybookParams) {
   messages.push({
     id: generateId(),
@@ -38,14 +40,22 @@ async function runModelPlaybook({
     createdAt: new Date()
   });
 
-  const monitoringSystemPrompt = getMonitoringSystemPrompt({ cloudProvider: project.cloudProvider });
+  const monitoringSystemPrompt = getMonitoringSystemPrompt({
+    cloudProvider: project.cloudProvider
+  });
   const targetDb = getTargetDbPool(connection.connectionString);
   try {
-    const tools = await getTools({ project, connection, targetDb, userId: schedule.userId });
+    const tools = await getTools({
+      project,
+      connection,
+      targetDb,
+      userId: schedule.userId,
+      origin: 'schedule'
+    });
     const result = await generateText({
       model: modelInstance,
       system: monitoringSystemPrompt,
-      maxSteps: 20,
+      maxSteps: 8,
       tools,
       messages
     });
@@ -223,7 +233,9 @@ export async function runSchedule(dbAccess: DBAccess, schedule: Schedule, now: D
   if (!project) {
     throw new Error(`Project ${connection.projectId} not found`);
   }
-  const monitoringSystemPrompt = getMonitoringSystemPrompt({ cloudProvider: project.cloudProvider });
+  const monitoringSystemPrompt = getMonitoringSystemPrompt({
+    cloudProvider: project.cloudProvider
+  });
   const result = await runModelPlaybook({
     messages,
     modelInstance,
@@ -231,7 +243,8 @@ export async function runSchedule(dbAccess: DBAccess, schedule: Schedule, now: D
     schedule,
     playbook: schedule.playbook,
     additionalInstructions: schedule.additionalInstructions ?? '',
-    project
+    project,
+    dbAccess
   });
   messages.push({
     id: generateId(),
@@ -264,7 +277,8 @@ export async function runSchedule(dbAccess: DBAccess, schedule: Schedule, now: D
         schedule,
         playbook: nextPlaybook,
         additionalInstructions: '',
-        project
+        project,
+        dbAccess
       });
       step++;
     }

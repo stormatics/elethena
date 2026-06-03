@@ -19,8 +19,8 @@ import Link from 'next/link';
 import { useParams, useRouter } from 'next/navigation';
 import { useEffect, useState } from 'react';
 import { CustomPlaybook } from '~/lib/tools/custom-playbooks';
-import { Playbook, getBuiltInPlaybooks } from '~/lib/tools/playbooks';
-import { actionGetCustomPlaybooks } from './action';
+import type { Playbook } from '~/lib/tools/playbook-types';
+import { actionGetBuiltInPlaybooks, actionGetCustomPlaybooks } from './action';
 
 export function PlaybooksTable() {
   const router = useRouter();
@@ -32,10 +32,9 @@ export function PlaybooksTable() {
   const loadPlaybooks = async () => {
     setIsLoading(true);
     try {
-      const playbooks = getBuiltInPlaybooks();
-      const customPlaybooks = await actionGetCustomPlaybooks(project);
-      setPlaybooks(playbooks);
-      setCustomPlaybooks(customPlaybooks);
+      const [builtIn, custom] = await Promise.all([actionGetBuiltInPlaybooks(), actionGetCustomPlaybooks(project)]);
+      setPlaybooks(builtIn);
+      setCustomPlaybooks(custom);
     } finally {
       setIsLoading(false);
     }

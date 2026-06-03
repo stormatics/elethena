@@ -2,8 +2,11 @@
 
 import { eq } from 'drizzle-orm';
 import { generateUUID } from '~/components/chat/utils';
+import { TtlCache } from './cache';
 import { DBAccess } from './db';
 import { Project, ProjectInsert, projectMembers, projects } from './schema';
+
+const projectByIdCache = new TtlCache<string, Project>(60_000, 1000);
 
 export async function generateProjectId(): Promise<string> {
   return generateUUID();
@@ -34,9 +37,13 @@ export async function getProjectByName(dbAccess: DBAccess, name: string): Promis
 }
 
 export async function getProjectById(dbAccess: DBAccess, id: string): Promise<Project | null> {
+  const cached = projectByIdCache.get(id);
+  if (cached) return cached;
   return await dbAccess.query(async ({ db }) => {
     const results = await db.select().from(projects).where(eq(projects.id, id));
-    return results[0] ?? null;
+    const row = results[0] ?? null;
+    if (row) projectByIdCache.set(id, row);
+    return row;
   });
 }
 
@@ -47,6 +54,7 @@ export async function listProjects(dbAccess: DBAccess): Promise<Project[]> {
 }
 
 export async function deleteProject(dbAccess: DBAccess, { id }: { id: string }): Promise<void> {
+  projectByIdCache.delete(id);
   await dbAccess.query(async ({ db }) => {
     await db.delete(projects).where(eq(projects.id, id));
   });
@@ -57,6 +65,7 @@ export async function updateProject(
   id: string,
   update: Partial<Omit<Project, 'id'>>
 ): Promise<void> {
+  projectByIdCache.delete(id);
   return await dbAccess.query(async ({ db }) => {
     await db.update(projects).set(update).where(eq(projects.id, id));
   });

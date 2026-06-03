@@ -16,19 +16,27 @@ import {
 } from '~/lib/tools/stats';
 import { ToolsetGroup } from './types';
 
-import { Pool, withPoolConnection } from '~/lib/targetdb/db';
+import { AuditContext } from '~/lib/targetdb/audit';
+import { Pool, withAuditedReadOnlyConnection } from '~/lib/targetdb/db';
 
-export function getDBSQLTools(targetDb: Pool): DBSQLTools {
-  return new DBSQLTools(targetDb);
+export function getDBSQLTools(targetDb: Pool, audit: AuditContext): DBSQLTools {
+  return new DBSQLTools(targetDb, audit);
 }
 
 // The DBSQLTools toolset provides tools for querying the postgres database
-// directly via SQL to collect system performance information.
+// directly via SQL to collect system performance information. Every query
+// runs inside a read-only transaction and is recorded in target_db_audit.
 export class DBSQLTools implements ToolsetGroup {
   #pool: Pool | (() => Promise<Pool>);
+  #audit: AuditContext;
 
-  constructor(pool: Pool | (() => Promise<Pool>)) {
+  constructor(pool: Pool | (() => Promise<Pool>), audit: AuditContext) {
     this.#pool = pool;
+    this.#audit = audit;
+  }
+
+  private run<T>(fn: (client: import('~/lib/targetdb/db').ClientBase) => Promise<T>): Promise<T> {
+    return withAuditedReadOnlyConnection(this.#pool, this.#audit, fn);
   }
 
   toolset(): Record<string, Tool> {
@@ -48,7 +56,7 @@ export class DBSQLTools implements ToolsetGroup {
   }
 
   getSlowQueries(): Tool {
-    const pool = this.#pool;
+    const run = this.run.bind(this);
     return tool({
       description: `Get a list of slow queries formatted as a JSON array. Contains how many times the query was called,
 the max execution time in seconds, the mean execution time in seconds, the total execution time
@@ -56,7 +64,7 @@ the max execution time in seconds, the mean execution time in seconds, the total
       parameters: z.object({}),
       execute: async () => {
         try {
-          return await withPoolConnection(pool, async (client) => await toolGetSlowQueries(client, 2000));
+          return await run((client) => toolGetSlowQueries(client, 2000));
         } catch (error) {
           return `Error getting slow queries: ${error}`;
         }
@@ -65,9 +73,9 @@ the max execution time in seconds, the mean execution time in seconds, the total
   }
 
   unsafeExplainQuery(): Tool {
-    const pool = this.#pool;
+    const run = this.run.bind(this);
     return tool({
-      description: `Run explain on a a query. Returns the explain plan as received from PostgreSQL.
+      description: `Run EXPLAIN on a query you supply. The agent is in a read-only transaction, so EXPLAIN (without ANALYZE) never executes the query.
 The query needs to be complete, it cannot contain $1, $2, etc. If you need to, replace the parameters with your own made up values.
 It's very important that $1, $2, etc. are not passed to this tool. Use the tool describeTable to get the types of the columns.
 If you know the schema, pass it in as well.`,
@@ -77,12 +85,8 @@ If you know the schema, pass it in as well.`,
       }),
       execute: async ({ schema = 'public', query }) => {
         try {
-          const explain = await withPoolConnection(
-            pool,
-            async (client) => await toolUnsafeExplainQuery(client, schema, query)
-          );
+          const explain = await run((client) => toolUnsafeExplainQuery(client, schema, query));
           if (!explain) return 'Could not run EXPLAIN on the query';
-
           return explain;
         } catch (error) {
           return `Error running EXPLAIN on the query: ${error}`;
@@ -92,9 +96,9 @@ If you know the schema, pass it in as well.`,
   }
 
   safeExplainQuery(): Tool {
-    const pool = this.#pool;
+    const run = this.run.bind(this);
     return tool({
-      description: `Safely run EXPLAIN on a query by fetching it from pg_stat_statements using queryId. 
+      description: `Safely run EXPLAIN on a query by fetching it from pg_stat_statements using queryId.
 This prevents SQL injection by not accepting raw SQL queries. Returns the explain plan as received from PostgreSQL.
 Use the queryid field from the getSlowQueries tool output as the queryId parameter.`,
       parameters: z.object({
@@ -103,7 +107,7 @@ Use the queryid field from the getSlowQueries tool output as the queryId paramet
       }),
       execute: async ({ schema = 'public', queryId }) => {
         try {
-          return await withPoolConnection(pool, async (client) => await toolSafeExplainQuery(client, schema, queryId));
+          return await run((client) => toolSafeExplainQuery(client, schema, queryId));
         } catch (error) {
           return `Error running safe EXPLAIN on the query: ${error}`;
         }
@@ -112,7 +116,7 @@ Use the queryid field from the getSlowQueries tool output as the queryId paramet
   }
 
   describeTable(): Tool {
-    const pool = this.#pool;
+    const run = this.run.bind(this);
     return tool({
       description: `Describe a table. If you know the schema, pass it as a parameter. If you don't, use public.`,
       parameters: z.object({
@@ -121,7 +125,7 @@ Use the queryid field from the getSlowQueries tool output as the queryId paramet
       }),
       execute: async ({ schema = 'public', table }) => {
         try {
-          return await withPoolConnection(pool, async (client) => await toolDescribeTable(client, schema, table));
+          return await run((client) => toolDescribeTable(client, schema, table));
         } catch (error) {
           return `Error describing table: ${error}`;
         }
@@ -130,7 +134,7 @@ Use the queryid field from the getSlowQueries tool output as the queryId paramet
   }
 
   findTableSchema(): Tool {
-    const pool = this.#pool;
+    const run = this.run.bind(this);
     return tool({
       description: `Find the schema of a table. Use this tool to find the schema of a table.`,
       parameters: z.object({
@@ -138,7 +142,7 @@ Use the queryid field from the getSlowQueries tool output as the queryId paramet
       }),
       execute: async ({ table }) => {
         try {
-          return await withPoolConnection(pool, async (client) => await toolFindTableSchema(client, table));
+          return await run((client) => toolFindTableSchema(client, table));
         } catch (error) {
           return `Error finding table schema: ${error}`;
         }
@@ -147,13 +151,13 @@ Use the queryid field from the getSlowQueries tool output as the queryId paramet
   }
 
   getCurrentActiveQueries(): Tool {
-    const pool = this.#pool;
+    const run = this.run.bind(this);
     return tool({
       description: `Get the currently active queries.`,
       parameters: z.object({}),
       execute: async () => {
         try {
-          return await withPoolConnection(pool, toolCurrentActiveQueries);
+          return await run(toolCurrentActiveQueries);
         } catch (error) {
           return `Error getting current active queries: ${error}`;
         }
@@ -162,13 +166,13 @@ Use the queryid field from the getSlowQueries tool output as the queryId paramet
   }
 
   getQueriesWaitingOnLocks(): Tool {
-    const pool = this.#pool;
+    const run = this.run.bind(this);
     return tool({
       description: `Get the queries that are currently blocked waiting on locks.`,
       parameters: z.object({}),
       execute: async () => {
         try {
-          return await withPoolConnection(pool, toolGetQueriesWaitingOnLocks);
+          return await run(toolGetQueriesWaitingOnLocks);
         } catch (error) {
           return `Error getting queries waiting on locks: ${error}`;
         }
@@ -177,13 +181,13 @@ Use the queryid field from the getSlowQueries tool output as the queryId paramet
   }
 
   getVacuumStats(): Tool {
-    const pool = this.#pool;
+    const run = this.run.bind(this);
     return tool({
       description: `Get the vacuum stats for the top tables in the database. They are sorted by the number of dead tuples descending.`,
       parameters: z.object({}),
       execute: async () => {
         try {
-          return await withPoolConnection(pool, toolGetVacuumStats);
+          return await run(toolGetVacuumStats);
         } catch (error) {
           return `Error getting vacuum stats: ${error}`;
         }
@@ -192,13 +196,13 @@ Use the queryid field from the getSlowQueries tool output as the queryId paramet
   }
 
   getConnectionsStats(): Tool {
-    const pool = this.#pool;
+    const run = this.run.bind(this);
     return tool({
       description: `Get the connections stats for the database.`,
       parameters: z.object({}),
       execute: async () => {
         try {
-          return await withPoolConnection(pool, toolGetConnectionsStats);
+          return await run(toolGetConnectionsStats);
         } catch (error) {
           return `Error getting connections stats: ${error}`;
         }
@@ -207,13 +211,13 @@ Use the queryid field from the getSlowQueries tool output as the queryId paramet
   }
 
   getConnectionsGroups(): Tool {
-    const pool = this.#pool;
+    const run = this.run.bind(this);
     return tool({
       description: `Get the connections groups for the database. This is a view in the pg_stat_activity table, grouped by (state, user, application_name, client_addr, wait_event_type, wait_event).`,
       parameters: z.object({}),
       execute: async () => {
         try {
-          return await withPoolConnection(pool, toolGetConnectionsGroups);
+          return await run(toolGetConnectionsGroups);
         } catch (error) {
           return `Error getting connections groups: ${error}`;
         }
@@ -222,13 +226,13 @@ Use the queryid field from the getSlowQueries tool output as the queryId paramet
   }
 
   getPerformanceAndVacuumSettings(): Tool {
-    const pool = this.#pool;
+    const run = this.run.bind(this);
     return tool({
       description: `Get the performance and vacuum settings for the database.`,
       parameters: z.object({}),
       execute: async () => {
         try {
-          return await withPoolConnection(pool, getPerformanceAndVacuumSettings);
+          return await run(getPerformanceAndVacuumSettings);
         } catch (error) {
           return `Error getting performance and vacuum settings: ${error}`;
         }

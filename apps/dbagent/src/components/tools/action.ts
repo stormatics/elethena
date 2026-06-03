@@ -42,7 +42,7 @@ export async function actionGetBuiltInAndCustomTools(connectionId: string): Prom
 
 export async function actionGetBuiltInTools(connectionId: string): Promise<Tool[]> {
   try {
-    await requireUserSession();
+    const userId = await requireUserSession();
     const dbAccess = await getUserSessionDBAccess();
     const connection = await getConnection(dbAccess, connectionId);
     if (!connection) {
@@ -50,7 +50,14 @@ export async function actionGetBuiltInTools(connectionId: string): Promise<Tool[
     }
 
     const targetDb = getTargetDbPool(connection.connectionString);
-    const dbTools = getDBSQLTools(targetDb);
+    // Synthetic audit context — this code path only inspects tool definitions
+    // for the UI, it never executes them.
+    const dbTools = getDBSQLTools(targetDb, {
+      userId,
+      projectId: connection.projectId,
+      connectionId: connection.id,
+      origin: 'manual'
+    });
 
     const clusterTools = getDBClusterTools(dbAccess, connection, 'aws'); // Default to AWS for now
     const playbookToolset = getPlaybookToolset(dbAccess, connection.projectId);

@@ -14,7 +14,14 @@ import {
   getCustomPlaybooks,
   getListOfCustomPlaybooksNames
 } from '~/lib/tools/custom-playbooks';
-import { Playbook } from '~/lib/tools/playbooks';
+import type { Playbook } from '~/lib/tools/playbook-types';
+import { getBuiltInPlaybooks } from '~/lib/tools/playbooks';
+
+// Server-action wrapper so the (use-client) playbooks table can render
+// built-ins without dragging the fs-reading module into the browser bundle.
+export async function actionGetBuiltInPlaybooks(): Promise<Playbook[]> {
+  return getBuiltInPlaybooks();
+}
 
 //playbook content generation
 export async function actionGeneratePlaybookContent(name: string, description: string): Promise<string> {

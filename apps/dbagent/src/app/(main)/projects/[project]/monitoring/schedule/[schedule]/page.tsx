@@ -7,8 +7,8 @@ export default async function Page({ params }: { params: Promise<{ project: stri
   const { project, schedule } = await params;
 
   const builtInPlaybooks = await actionListPlaybooks();
-  const customPlaybooks = (await actionListCustomPlaybooksNames(project)) ?? [];
-  const playbooks = [...builtInPlaybooks, ...customPlaybooks];
+  const customPlaybookNames = (await actionListCustomPlaybooksNames(project)) ?? [];
+  const playbooks = [...builtInPlaybooks, ...customPlaybookNames];
 
   const connections = await getProjectConnectionList(project);
 

@@ -1,9 +1,13 @@
 import pg from 'pg';
+import { AuditContext, writeAudit } from './audit';
 
 export type PoolConfig = pg.PoolConfig;
 export type Pool = pg.Pool;
 export type Client = pg.Client;
 export type ClientBase = pg.ClientBase;
+
+// Default per-statement guardrails on target-DB queries.
+const DEFAULT_STATEMENT_TIMEOUT_MS = 60_000;
 
 export function getTargetDbPool(connectionString: string, poolConfig: Omit<PoolConfig, 'connectionString'> = {}): Pool {
   const parsed = parseConnectionString(connectionString);
@@ -49,6 +53,88 @@ export async function withPoolConnection<T>(
   }
 }
 
+/**
+ * Wrap fn in a read-only transaction with a statement timeout. Every
+ * client.query call inside fn is also audited (fire-and-forget) into the
+ * state DB's target_db_audit table.
+ *
+ * This is the entry point all LLM-facing target-DB tools should use.
+ */
+export async function withAuditedReadOnlyConnection<T>(
+  pool: Pool | (() => Promise<Pool>),
+  audit: AuditContext,
+  fn: (client: ClientBase) => Promise<T>,
+  options: { statementTimeoutMs?: number } = {}
+): Promise<T> {
+  const poolInstance = typeof pool === 'function' ? await pool() : pool;
+  const client = await poolInstance.connect();
+  const timeoutMs = options.statementTimeoutMs ?? DEFAULT_STATEMENT_TIMEOUT_MS;
+  try {
+    await client.query('BEGIN');
+    await client.query('SET TRANSACTION READ ONLY');
+    await client.query(`SET LOCAL statement_timeout = ${timeoutMs}`);
+
+    const audited = wrapClientWithAudit(client, audit);
+    const result = await fn(audited);
+    await client.query('COMMIT');
+    return result;
+  } catch (err) {
+    try {
+      await client.query('ROLLBACK');
+    } catch {
+      /* ignore — connection probably dead */
+    }
+    throw err;
+  } finally {
+    client.release();
+  }
+}
+
+/**
+ * Proxy a pg client so every .query call also writes a row to target_db_audit.
+ * Audit writes are fire-and-forget — failures never affect the real query.
+ */
+function wrapClientWithAudit(client: ClientBase, audit: AuditContext): ClientBase {
+  return new Proxy(client, {
+    get(target, prop, receiver) {
+      if (prop !== 'query') {
+        const value = Reflect.get(target, prop, receiver);
+        return typeof value === 'function' ? value.bind(target) : value;
+      }
+      const originalQuery = (target as any).query.bind(target);
+      return async function auditedQuery(...args: unknown[]) {
+        const firstArg = args[0] as { text?: string; values?: unknown[] } | string | undefined;
+        const sqlText =
+          typeof firstArg === 'string' ? firstArg : firstArg && 'text' in firstArg ? (firstArg.text ?? '') : '';
+        const sqlParams =
+          typeof firstArg === 'object' && firstArg !== null && 'values' in firstArg
+            ? firstArg.values
+            : (args[1] as unknown[] | undefined);
+        const start = Date.now();
+        try {
+          const result = await originalQuery(...args);
+          const rowCount = typeof result?.rowCount === 'number' ? result.rowCount : result?.rows?.length;
+          writeAudit(audit, {
+            sqlText,
+            sqlParams,
+            rows: rowCount,
+            durationMs: Date.now() - start
+          });
+          return result;
+        } catch (err) {
+          writeAudit(audit, {
+            sqlText,
+            sqlParams,
+            durationMs: Date.now() - start,
+            error: err instanceof Error ? err.message : String(err)
+          });
+          throw err;
+        }
+      };
+    }
+  }) as ClientBase;
+}
+
 export async function withTargetDbConnection<T>(
   connectionString: string,
   fn: (client: ClientBase) => Promise<T>
@@ -74,35 +160,29 @@ export interface TableStat {
 }
 
 export async function getTableStats(client: ClientBase): Promise<TableStat[]> {
+  // Catalog-direct query (no information_schema join, no fragile regnamespace cast).
+  // Lists user tables across every user schema, ordered by total relation size.
   const result = await client.query(`
     SELECT
-        c.oid AS oid,
-        t.table_name AS name,
-        t.table_schema AS schema,
-        pg_total_relation_size(quote_ident(t.table_schema) || '.' || quote_ident(t.table_name)) AS size,
-        pg_size_pretty(pg_total_relation_size(quote_ident(t.table_schema) || '.' || quote_ident(t.table_name))) AS sizeh,
-        ROUND(c.reltuples) AS rows,
-        s.seq_scan AS seq_scan,
-        s.idx_scan AS idx_scan,
-        s.n_tup_ins AS n_tup_ins,
-        s.n_tup_upd AS n_tup_upd,
-        s.n_tup_del AS n_tup_del
-    FROM
-        information_schema.tables t
-    LEFT JOIN
-        pg_class c
-    ON
-        t.table_name = c.relname
-        AND t.table_schema = c.relnamespace::regnamespace::text
-    LEFT JOIN
-        pg_stat_all_tables s
-    ON
-        c.oid = s.relid
-    WHERE
-        c.oid IS NOT NULL
-        AND t.table_schema NOT IN ('pg_catalog', 'information_schema')
-    ORDER BY
-        size DESC
+        c.oid                                AS oid,
+        c.relname                            AS name,
+        n.nspname                            AS schema,
+        pg_total_relation_size(c.oid)        AS size,
+        pg_size_pretty(pg_total_relation_size(c.oid)) AS sizeh,
+        ROUND(c.reltuples)                   AS rows,
+        COALESCE(s.seq_scan, 0)              AS seq_scan,
+        COALESCE(s.idx_scan, 0)              AS idx_scan,
+        COALESCE(s.n_tup_ins, 0)             AS n_tup_ins,
+        COALESCE(s.n_tup_upd, 0)             AS n_tup_upd,
+        COALESCE(s.n_tup_del, 0)             AS n_tup_del
+    FROM pg_class c
+    JOIN pg_namespace n ON n.oid = c.relnamespace
+    LEFT JOIN pg_stat_all_tables s ON s.relid = c.oid
+    WHERE c.relkind IN ('r', 'p')              -- ordinary + partitioned tables
+      AND n.nspname NOT IN ('pg_catalog', 'information_schema')
+      AND n.nspname NOT LIKE 'pg_toast%'
+      AND n.nspname NOT LIKE 'pg_temp%'
+    ORDER BY pg_total_relation_size(c.oid) DESC
     LIMIT 100;
 `);
 

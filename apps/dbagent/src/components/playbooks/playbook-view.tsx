@@ -4,7 +4,7 @@ import { Button, Card, CardContent, CardDescription, CardFooter, CardHeader, Car
 import { ArrowLeft, Clock, PlayCircle } from 'lucide-react';
 import Link from 'next/link';
 import { useParams } from 'next/navigation';
-import { Playbook } from '~/lib/tools/playbooks';
+import type { Playbook } from '~/lib/tools/playbook-types';
 
 export function PlaybookView({ playbook }: { playbook: Playbook }) {
   const { project } = useParams<{ project: string }>();

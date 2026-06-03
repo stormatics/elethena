@@ -80,14 +80,24 @@ function PureMultimodalInput({
   };
 
   const submitForm = useCallback(() => {
-    handleSubmit(undefined);
+    // Read the textarea's DOM value at the moment of submission. React 18
+    // batches state updates, so on a fast Enter-keypress the most recent
+    // setInput from handleInput may not yet have flushed to the AI SDK's
+    // internal state. handleSubmit(undefined) would then submit the prior
+    // value. Going through the DOM + explicit append() avoids that race —
+    // matches what users see in the textarea exactly.
+    const currentInput = (textareaRef.current?.value ?? input).trim();
+    if (!currentInput) return;
+
+    void append({ role: 'user', content: currentInput });
+    setInput('');
     setLocalStorageInput('');
     resetHeight();
 
     if (width && width > 768) {
       textareaRef.current?.focus();
     }
-  }, [handleSubmit, setLocalStorageInput, width, chatId]);
+  }, [append, input, setInput, setLocalStorageInput, width, chatId]);
 
   return (
     <div className="relative flex w-full flex-col gap-4">

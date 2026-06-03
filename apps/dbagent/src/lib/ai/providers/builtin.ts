@@ -2,10 +2,20 @@ import { anthropic } from '@ai-sdk/anthropic';
 import { deepseek } from '@ai-sdk/deepseek';
 import { google } from '@ai-sdk/google';
 import { createOpenAI } from '@ai-sdk/openai';
+import { type LanguageModelV1Middleware, wrapLanguageModel } from 'ai';
 import { env } from '~/lib/env/server';
 
 import { Model, ProviderRegistry } from './types';
 import { combineRegistries, createModel, createRegistryFromModels } from './utils';
+
+// Newer Claude models reject `temperature` (and require fixed values for `topP`).
+// Strip them so the model uses its own defaults.
+const stripUnsupportedSamplingParams: LanguageModelV1Middleware = {
+  transformParams: async ({ params }) => {
+    const { temperature: _t, topP: _p, ...rest } = params;
+    return rest;
+  }
+};
 
 // ─── OpenAI ──────────────────────────────────────────────────────────────────
 
@@ -59,7 +69,9 @@ async function createAnthropicRegistry(): Promise<ProviderRegistry> {
 
   const data = (await response.json()) as { data: Array<{ id: string; display_name: string }> };
   const models: Model[] = data.data.map((m) =>
-    createModel({ id: `anthropic:${m.id}`, name: m.display_name }, () => anthropic.languageModel(m.id))
+    createModel({ id: `anthropic:${m.id}`, name: m.display_name }, () =>
+      wrapLanguageModel({ model: anthropic.languageModel(m.id), middleware: stripUnsupportedSamplingParams })
+    )
   );
 
   if (models.length === 0) throw new Error('Anthropic returned no usable models');

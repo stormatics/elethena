@@ -18,6 +18,13 @@ tsconfig.tsbuildinfo
 **/.auth/**
 
 **/.env
+**/.env.production
+**/.env.local
+**/.env.*.local
+.env*
+# ...but keep committed templates
+!.env*.example
+!**/.env*.example
 
 .maki/
 

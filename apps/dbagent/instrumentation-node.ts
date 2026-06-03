@@ -110,16 +110,25 @@ const traceExporter = createExporter();
 const contextManager = new AsyncLocalStorageContextManager();
 contextManager.enable();
 
-const sdk = new NodeSDK({
-  contextManager,
-  traceExporter,
-  spanProcessor: traceExporter ? new BatchSpanProcessor(traceExporter) : undefined,
-  instrumentations: [getNodeAutoInstrumentations()]
-});
+// Only register the OTel SDK at all if there's somewhere to ship spans to.
+// Without this guard, the OTLP exporter retries an unreachable localhost:4318
+// every request, flooding logs with ECONNREFUSED and adding latency.
+const sdk = traceExporter
+  ? new NodeSDK({
+      contextManager,
+      traceExporter,
+      spanProcessor: new BatchSpanProcessor(traceExporter),
+      instrumentations: [getNodeAutoInstrumentations()]
+    })
+  : null;
 
-sdk.start();
+if (sdk) sdk.start();
 
 process.on('SIGTERM', () => {
+  if (!sdk) {
+    process.exit(0);
+    return;
+  }
   sdk
     .shutdown()
     .then(

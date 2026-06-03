@@ -6,7 +6,7 @@ import { getLanguageModel, getLanguageModelWithFallback, ModelWithFallback } fro
 function getCloudProviderPrompt(cloudProvider: string): string {
   switch (cloudProvider) {
     case 'aws':
-      return `All Postgres instances in this project are hosted on AWS, either RDS or Aurora. 
+      return `All Postgres instances in this project are hosted on AWS, either RDS or Aurora.
       When recommending actions, only recommend actions that can be performed on RDS or Aurora.
       If you need to know more about the instance, you can use the getClusterInfo tool.
       If you want to recommend changes to the instance, provide instructions specific to RDS or Aurora.

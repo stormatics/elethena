@@ -28,7 +28,9 @@ export const evalChat = async ({
     name: 'evaldb',
     connectionString: dbConnection,
     projectId: project.id,
-    isDefault: true
+    isDefault: true,
+    cores: null,
+    memoryGib: null
   };
 
   const targetDb = getTargetDbPool(connection.connectionString);

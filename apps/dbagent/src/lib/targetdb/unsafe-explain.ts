@@ -262,23 +262,18 @@ export async function unsafeExplainQuery(client: ClientBase, schema: string, que
     return 'The query is not a single safe statement. Only SELECT, INSERT, UPDATE, DELETE, and WITH statements are allowed.';
   }
 
+  // The caller wraps this in a read-only transaction with statement_timeout already set.
+  // We only need to tighten timeouts further and set the search path within that tx.
   const hasPlaceholders = /\$\d+/.test(query);
-  let toReturn = '';
   try {
-    await client.query('BEGIN');
     await client.query("SET LOCAL statement_timeout = '2000ms'");
     await client.query("SET LOCAL lock_timeout = '200ms'");
-    await client.query(`SET search_path TO ${schema}`);
+    await client.query(`SET LOCAL search_path TO ${schema}`);
     const explainQuery = hasPlaceholders ? `EXPLAIN (GENERIC_PLAN true) ${query}` : `EXPLAIN ${query}`;
-    console.log(schema);
-    console.log(explainQuery);
     const result = await client.query(explainQuery);
-    console.log(result.rows);
-    toReturn = result.rows.map((row: { [key: string]: string }) => row['QUERY PLAN']).join('\n');
+    return result.rows.map((row: { [key: string]: string }) => row['QUERY PLAN']).join('\n');
   } catch (error) {
     console.error('Error explaining query', error);
-    toReturn = 'I could not run EXPLAIN on that query. Try a different method.';
+    return 'I could not run EXPLAIN on that query. Try a different method.';
   }
-  await client.query('ROLLBACK');
-  return toReturn;
 }

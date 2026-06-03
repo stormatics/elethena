@@ -5,7 +5,7 @@ import { ArrowLeft, TrashIcon, Wand2 } from 'lucide-react';
 import Link from 'next/link';
 import { useParams, useRouter } from 'next/navigation';
 import { useState } from 'react';
-import { Playbook } from '~/lib/tools/playbooks';
+import type { Playbook } from '~/lib/tools/playbook-types';
 import { generateUUID } from '../chat/utils';
 import {
   actionCreatePlaybook,

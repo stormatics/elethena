@@ -1,7 +1,8 @@
 import { CronExpressionParser } from 'cron-parser';
-import { incrementScheduleFailures, setScheduleStatusRunning, updateScheduleRunData } from '~/lib/db/schedules';
+import { sql } from 'drizzle-orm';
+import { incrementScheduleFailures, updateScheduleRunData } from '~/lib/db/schedules';
 import { DBAccess, DBUserAccess, getAdminAccess } from '../db/db';
-import { Schedule, ScheduleInsert, schedules as schedulesSchema } from '../db/schema';
+import { Schedule, ScheduleInsert } from '../db/schema';
 import { env } from '../env/server';
 import { runSchedule } from './runner';
 
@@ -47,33 +48,43 @@ export function shouldRunSchedule(schedule: Schedule, now: Date): boolean {
 export async function checkAndRunJobsAsAdmin() {
   console.log('Checking and running jobs as admin');
   try {
-    // Use DBAdminAccess to fetch all schedules
     const adminAccess = getAdminAccess();
-    const schedules = await adminAccess.query(async ({ db }) => {
-      return await db.select().from(schedulesSchema);
+    const now = new Date();
+    const timeoutSecs = env.TIMEOUT_FOR_RUNNING_SCHEDULE_SECS;
+    const maxRuns = env.MAX_PARALLEL_RUNS;
+
+    // Atomically claim up to MAX_PARALLEL_RUNS due schedules using FOR UPDATE
+    // SKIP LOCKED. Each scheduler-tick (potentially across replicas) pulls a
+    // distinct slice — no double-execution, no leader-election sidecar needed.
+    // We mark them as 'running' inside the same transaction so they're
+    // invisible to the next tick.
+    const schedulesToRunNow = await adminAccess.query(async ({ db }) => {
+      const result = await db.execute(sql<Schedule>`
+        WITH due AS (
+          SELECT id FROM schedules
+          WHERE enabled = true
+            AND (
+              (status = 'scheduled' AND next_run <= ${now.toUTCString()}::timestamptz)
+              OR (status = 'running' AND next_run + (${timeoutSecs} * INTERVAL '1 second') < ${now.toUTCString()}::timestamptz)
+            )
+          ORDER BY next_run ASC
+          FOR UPDATE SKIP LOCKED
+          LIMIT ${maxRuns}
+        )
+        UPDATE schedules s
+        SET status = 'running'
+        FROM due
+        WHERE s.id = due.id
+        RETURNING s.*;
+      `);
+      return (result.rows ?? []) as unknown as Schedule[];
     });
 
-    const now = new Date();
+    if (schedulesToRunNow.length === 0) return;
 
-    // Filter schedules that should run
-    const schedulesToRun = [];
-    for (const schedule of schedules) {
-      if (!schedule.enabled) continue;
-      const shouldRun = shouldRunSchedule(schedule, now);
-      if (shouldRun) {
-        schedulesToRun.push(schedule);
-      }
-    }
+    console.log(`Claimed ${schedulesToRunNow.length} schedule(s) this tick`);
 
-    // Take only up to MAX_PARALLEL_JOBS
-    // Randomly shuffle the array and take first MAX_PARALLEL_JOBS items
-    const shuffled = [...schedulesToRun].sort(() => Math.random() - 0.5);
-    const schedulesToRunNow = shuffled.slice(0, env.MAX_PARALLEL_RUNS);
-    if (schedulesToRun.length > env.MAX_PARALLEL_RUNS) {
-      console.log(`Deferring ${schedulesToRun.length - env.MAX_PARALLEL_RUNS} jobs until next wake up`);
-    }
-
-    // Run selected jobs in parallel, each with its own DBUserAccess instance
+    // Run claimed jobs in parallel, each with its own DBUserAccess instance.
     await Promise.all(
       schedulesToRunNow.map((schedule) => {
         const userAccess = new DBUserAccess(schedule.userId);
@@ -88,17 +99,7 @@ export async function checkAndRunJobsAsAdmin() {
 async function runJob(dbAccess: DBAccess, schedule: Schedule, now: Date) {
   console.log(`Running playbook ${schedule.playbook} for schedule ${schedule.id}`);
 
-  if (schedule.status === 'scheduled') {
-    try {
-      await setScheduleStatusRunning(dbAccess, schedule);
-    } catch (error) {
-      // I'm going to assume that some other worker has just picked this up
-      // and will do the job
-      console.error(`Someone else is running schedule ${schedule.id}:`, error);
-      return;
-    }
-  }
-
+  // Status is already 'running' (set atomically by the claim in checkAndRunJobsAsAdmin).
   try {
     await runSchedule(dbAccess, schedule, now);
   } catch (error) {
@@ -106,10 +107,10 @@ async function runJob(dbAccess: DBAccess, schedule: Schedule, now: Date) {
     await incrementScheduleFailures(dbAccess, schedule);
   }
 
-  // Schedule the next run (also in case of errors)
+  // Reset to 'scheduled' and recompute next_run (also in case of errors).
   schedule.status = 'scheduled';
   schedule.lastRun = now.toUTCString();
   schedule.nextRun = scheduleGetNextRun(schedule, now).toUTCString();
   await updateScheduleRunData(dbAccess, schedule);
-  console.log(`Wrote back ${JSON.stringify(schedule)} to the DB`);
+  console.log(`Schedule ${schedule.id} → next_run ${schedule.nextRun}`);
 }

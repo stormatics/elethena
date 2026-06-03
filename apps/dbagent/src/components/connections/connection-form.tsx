@@ -8,6 +8,8 @@ import { actionDeleteConnection, actionGetConnection, actionSaveConnection, vali
 type FormData = {
   name: string;
   connectionString: string;
+  cores?: string;
+  memoryGib?: string;
 };
 
 type ConnectionFormProps = {
@@ -39,7 +41,9 @@ export function ConnectionForm({ projectId, id }: ConnectionFormProps) {
         if (connection) {
           reset({
             name: connection.name,
-            connectionString: connection.connectionString
+            connectionString: connection.connectionString,
+            cores: connection.cores != null ? String(connection.cores) : '',
+            memoryGib: connection.memoryGib != null ? String(connection.memoryGib) : ''
           });
         }
       }
@@ -49,11 +53,15 @@ export function ConnectionForm({ projectId, id }: ConnectionFormProps) {
 
   const onSubmit = async (data: FormData) => {
     setIsSaving(true);
+    const cores = data.cores && data.cores.trim() !== '' ? Number(data.cores) : null;
+    const memoryGib = data.memoryGib && data.memoryGib.trim() !== '' ? Number(data.memoryGib) : null;
     const result = await actionSaveConnection({
       projectId,
       id: id ?? null,
       name: data.name,
-      connectionString: data.connectionString
+      connectionString: data.connectionString,
+      cores,
+      memoryGib
     });
     setIsSaving(false);
     if (result.success) {
@@ -112,6 +120,29 @@ export function ConnectionForm({ projectId, id }: ConnectionFormProps) {
             className="mt-1"
           />
           {errors.connectionString && <p className="mt-1 text-sm text-red-500">{errors.connectionString.message}</p>}
+        </div>
+        <div className="grid grid-cols-2 gap-4">
+          <div>
+            <Label htmlFor="cores">CPU Cores (optional)</Label>
+            <Input id="cores" type="number" min={1} {...register('cores')} placeholder="e.g. 64" className="mt-1" />
+            <p className="text-muted-foreground mt-1 text-xs">
+              Used by the postgresql-config playbook so the agent doesn&apos;t have to ask each time.
+            </p>
+          </div>
+          <div>
+            <Label htmlFor="memoryGib">Memory (GiB, optional)</Label>
+            <Input
+              id="memoryGib"
+              type="number"
+              min={1}
+              {...register('memoryGib')}
+              placeholder="e.g. 512"
+              className="mt-1"
+            />
+            <p className="text-muted-foreground mt-1 text-xs">
+              RAM allocated to the Postgres pod / VM. Drives tuning formulas.
+            </p>
+          </div>
         </div>
         <div className="flex space-x-4">
           {id && !showDeleteConfirm && (

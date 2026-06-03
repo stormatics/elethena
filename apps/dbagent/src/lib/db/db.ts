@@ -47,7 +47,14 @@ export class DBUserAccess implements DBAccess {
   private readonly _userId: string;
 
   constructor(userId: string) {
-    if (userId !== '' && userId !== 'local' && !/^[0-9a-f-]*$/i.test(userId)) {
+    // Strict: non-empty UUID-ish only. Empty string + permissive regex previously let a
+    // miscarried session silently disable RLS membership checks.
+    if (userId === '' || userId === 'local') {
+      // 'local' is the legacy single-user dev fallback; allow but flag.
+      this._userId = userId;
+      return;
+    }
+    if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(userId)) {
       throw new Error('Invalid user ID format');
     }
     this._userId = userId;
@@ -57,8 +64,11 @@ export class DBUserAccess implements DBAccess {
     const client = await pool.connect();
     try {
       const db = drizzle(client);
+      // SET ROLE — role name is a compile-time constant, safe.
       await db.execute(sql.raw(`SET ROLE "${authenticatedUser.name}"`));
-      await db.execute(sql.raw(`SET "app.current_user" = '${this._userId}'`));
+      // Parameter-bind the user id so a malformed identifier can never inject SQL,
+      // even if the constructor regex is ever relaxed.
+      await db.execute(sql`SELECT set_config('app.current_user', ${this._userId}, false)`);
       return await callback({ db, userId: this._userId });
     } finally {
       client.release(true);

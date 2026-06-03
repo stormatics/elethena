@@ -1,9 +1,29 @@
-export interface Playbook {
-  name: string;
-  description: string;
-  content: string;
-  isBuiltIn: boolean;
+import { readFileSync } from 'fs';
+import path from 'path';
+import 'server-only';
+import type { Playbook } from './playbook-types';
+
+export type { Playbook };
+
+// Load Markdown-source playbooks once at module init. The .md files ship in
+// the docker image at apps/dbagent/built-in-playbooks/.
+function loadMd(filename: string): { description: string; content: string } {
+  const file = path.join(process.cwd(), 'built-in-playbooks', filename);
+  const raw = readFileSync(file, 'utf8');
+  // Parse YAML frontmatter — we only need `description:` from it.
+  const match = raw.match(/^---\r?\n([\s\S]*?)\r?\n---\r?\n?/);
+  let description = '';
+  let body = raw;
+  if (match) {
+    const desc = match[1]!.match(/^description:\s*(?:"([^"]*)"|(.+))$/m);
+    if (desc) description = (desc[1] ?? desc[2] ?? '').trim();
+    body = raw.slice(match[0].length).trim();
+  }
+  return { description, content: body };
 }
+
+const PG_HEALTH_CHECK = loadMd('pg-health-check.md');
+const POSTGRESQL_CONFIG = loadMd('postgresql-config.md');
 
 const SLOW_QUERIES_PLAYBOOK = `
 Follow the following steps to find and troubleshoot slow queries:
@@ -220,20 +240,25 @@ export function getPlaybook(name: string): string {
       return INVESTIGATE_HIGH_CONNECTION_COUNT_PLAYBOOK;
     case 'investigateLowMemory':
       return INVESTIGATE_LOW_MEMORY_PLAYBOOK;
+    case 'pg-health-check':
+      return PG_HEALTH_CHECK.content;
+    case 'postgresql-config':
+      return POSTGRESQL_CONFIG.content;
     default:
       return `Error:Playbook ${name} not found`;
   }
 }
 
 export function listPlaybooks(): string[] {
-  //TODO: add the custom playbooks
   return [
     'generalMonitoring',
     'investigateSlowQueries',
     'investigateHighCpuUsage',
     'investigateLowMemory',
     'investigateHighConnectionCount',
-    'tuneSettings'
+    'tuneSettings',
+    'pg-health-check',
+    'postgresql-config'
   ];
 }
 
@@ -274,6 +299,18 @@ export function getBuiltInPlaybooks(): Playbook[] {
       name: 'tuneSettings',
       description: 'Tune configuration settings for the database, based on the instance type, the database schema. ',
       content: TUNING_PLAYBOOK,
+      isBuiltIn: true
+    },
+    {
+      name: 'pg-health-check',
+      description: PG_HEALTH_CHECK.description,
+      content: PG_HEALTH_CHECK.content,
+      isBuiltIn: true
+    },
+    {
+      name: 'postgresql-config',
+      description: POSTGRESQL_CONFIG.description,
+      content: POSTGRESQL_CONFIG.content,
       isBuiltIn: true
     }
   ];

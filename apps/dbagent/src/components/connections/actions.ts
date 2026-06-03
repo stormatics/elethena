@@ -41,12 +41,16 @@ export async function actionSaveConnection({
   projectId,
   id,
   name,
-  connectionString
+  connectionString,
+  cores,
+  memoryGib
 }: {
   projectId: string;
   id: string | null;
   name: string;
   connectionString: string;
+  cores?: number | null;
+  memoryGib?: number | null;
 }) {
   const dbAccess = await getUserSessionDBAccess();
 
@@ -57,10 +61,10 @@ export async function actionSaveConnection({
     }
 
     if (id) {
-      await updateConnection(dbAccess, { id, name, connectionString });
+      await updateConnection(dbAccess, { id, name, connectionString, cores, memoryGib });
       return { success: true, message: 'Connection updated successfully' };
     } else {
-      await addConnection(dbAccess, { projectId, name, connectionString });
+      await addConnection(dbAccess, { projectId, name, connectionString, cores, memoryGib });
       return { success: true, message: 'Connection added successfully' };
     }
   } catch (error) {

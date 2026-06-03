@@ -3,7 +3,14 @@
 import { Button, Select, SelectContent, SelectItem, SelectTrigger, SelectValue, toast } from '@xata.io/components';
 import { useEffect, useState } from 'react';
 import { Connection } from '~/lib/db/schema';
-import { CollectInfo as CollectInfoType, getCollectInfo } from './actions';
+import {
+  CollectInfo as CollectInfoType,
+  collectExtensions,
+  collectPerformanceSettings,
+  collectTables,
+  collectVacuumData,
+  getCollectInfo
+} from './actions';
 import { ExtensionsCard } from './extensions-card';
 import { PerformanceSettingsCard } from './settings-card';
 import { TablesCard } from './tables-card';
@@ -43,15 +50,34 @@ export function CollectInfo({ connections }: CollectInfoProps) {
     void fetchExistingInfo();
   }, [selectedConnection]);
 
+  const [isCollectingFresh, setIsCollectingFresh] = useState(false);
+
   const handleCollectInfo = async () => {
-    if (selectedConnection) {
-      const result = await getCollectInfo(selectedConnection);
-      if (result.success && result.data) {
-        setCollectData(result.data);
-      }
+    if (!selectedConnection) return;
+    setIsCollectingFresh(true);
+    try {
+      // Re-run all four collectors against the target DB. Each writes its
+      // result back to connection_info in the state DB AND returns the rows
+      // we want to render immediately.
+      const [tables, extensions, perf, vacuum] = await Promise.all([
+        collectTables(selectedConnection),
+        collectExtensions(selectedConnection),
+        collectPerformanceSettings(selectedConnection),
+        collectVacuumData(selectedConnection)
+      ]);
+      const fail = [tables, extensions, perf, vacuum].find((r) => !r.success);
+      if (fail) toast(`Error: ${fail.message}`);
+      setCollectData({
+        tables: tables.data,
+        extensions: extensions.data,
+        performance_settings: perf.data,
+        vacuum_settings: vacuum.data
+      });
+      setShowInfo(true);
+      setRefreshKey((prevKey) => prevKey + 1);
+    } finally {
+      setIsCollectingFresh(false);
     }
-    setShowInfo(true);
-    setRefreshKey((prevKey) => prevKey + 1);
   };
 
   return (
@@ -80,8 +106,8 @@ export function CollectInfo({ connections }: CollectInfoProps) {
             ))}
           </SelectContent>
         </Select>
-        <Button onClick={handleCollectInfo} disabled={!selectedConnection}>
-          {isCollecting ? 'Collecting...' : showInfo ? 'Refresh Info' : 'Collect Info'}
+        <Button onClick={handleCollectInfo} disabled={!selectedConnection || isCollectingFresh}>
+          {isCollectingFresh ? 'Collecting…' : showInfo ? 'Refresh Info' : 'Collect Info'}
         </Button>
       </div>
       {showInfo && (

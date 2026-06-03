@@ -1,6 +1,7 @@
 import { Message as SDKMessage } from '@ai-sdk/ui-utils';
 import { InferInsertModel, InferSelectModel, sql } from 'drizzle-orm';
 import {
+  bigserial,
   boolean,
   foreignKey,
   index,
@@ -75,7 +76,12 @@ export const connections = pgTable(
     projectId: uuid('project_id').notNull(),
     name: text('name').notNull(),
     isDefault: boolean('is_default').default(false).notNull(),
-    connectionString: text('connection_string').notNull()
+    connectionString: text('connection_string').notNull(),
+    // Node specs used by the postgresql-config playbook so the agent doesn't
+    // have to re-ask cores/memory every run. Optional; the playbook will ask
+    // if unset.
+    cores: integer('cores'),
+    memoryGib: integer('memory_gib')
   },
   (table) => [
     foreignKey({
@@ -680,6 +686,33 @@ export const playbooks = pgTable(
 
 export type Playbook = InferSelectModel<typeof playbooks>;
 export type PlaybookInsert = InferInsertModel<typeof playbooks>;
+
+// Append-only audit log: every SQL statement run against a target Postgres,
+// no matter who initiated it. Used for the 4-DBA team's incident review.
+export const targetDbAudit = pgTable(
+  'target_db_audit',
+  {
+    id: bigserial('id', { mode: 'number' }).primaryKey(),
+    userId: text('user_id').notNull(),
+    projectId: uuid('project_id').notNull(),
+    connectionId: uuid('connection_id').notNull(),
+    origin: text('origin').notNull(), // 'chat' | 'schedule' | 'healthcheck' | 'manual'
+    sqlText: text('sql_text').notNull(),
+    sqlParams: jsonb('sql_params'),
+    rows: integer('rows'),
+    startedAt: timestamp('started_at', { mode: 'date' }).defaultNow().notNull(),
+    durationMs: integer('duration_ms'),
+    error: text('error')
+  },
+  (table) => [
+    index('idx_target_db_audit_started').on(table.startedAt),
+    index('idx_target_db_audit_conn').on(table.connectionId, table.startedAt),
+    index('idx_target_db_audit_project').on(table.projectId, table.startedAt)
+  ]
+);
+
+export type TargetDbAudit = InferSelectModel<typeof targetDbAudit>;
+export type TargetDbAuditInsert = InferInsertModel<typeof targetDbAudit>;
 
 export const mcpServers = pgTable(
   'mcp_servers',
