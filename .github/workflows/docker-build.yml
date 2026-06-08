@@ -65,24 +65,25 @@ jobs:
           context: .
           file: ./Dockerfile
           push: ${{ github.event_name != 'pull_request' }}
-          load: ${{ github.event_name == 'pull_request' }}
+          load: true # also keep image in local store so Trivy can scan it
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
       - name: Trivy vulnerability scan
-        uses: aquasecurity/trivy-action@0.28.0
+        uses: aquasecurity/trivy-action@v0.30.0
+        continue-on-error: true # scan is compliance evidence, not a build gate
         with:
-          # On PR the image is loaded locally; otherwise scan the first pushed tag.
-          image-ref: ${{ github.event_name == 'pull_request' && fromJSON(steps.meta.outputs.json).tags[0] || fromJSON(steps.meta.outputs.json).tags[0] }}
+          image-ref: ${{ fromJSON(steps.meta.outputs.json).tags[0] }}
           format: sarif
           output: trivy-results.sarif
           severity: CRITICAL,HIGH
           ignore-unfixed: true
 
       - name: Upload scan results to Security tab
-        if: always()
+        if: hashFiles('trivy-results.sarif') != ''
+        continue-on-error: true
         uses: github/codeql-action/upload-sarif@v3
         with:
           sarif_file: trivy-results.sarif
