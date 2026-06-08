@@ -20,7 +20,6 @@ function PureMultimodalInput({
   messages,
   setMessages,
   append,
-  handleSubmit,
   className
 }: {
   suggestedActions?: SuggestedAction[];

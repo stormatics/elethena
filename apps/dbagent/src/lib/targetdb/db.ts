@@ -132,7 +132,7 @@ function wrapClientWithAudit(client: ClientBase, audit: AuditContext): ClientBas
         }
       };
     }
-  }) as ClientBase;
+  });
 }
 
 export async function withTargetDbConnection<T>(

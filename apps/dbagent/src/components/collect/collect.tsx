@@ -21,7 +21,6 @@ interface CollectInfoProps {
 }
 
 export function CollectInfo({ connections }: CollectInfoProps) {
-  const [isCollecting] = useState(false);
   const [showInfo, setShowInfo] = useState(false);
   const defaultConnection = connections.find((c) => c.isDefault);
   const [selectedConnection, setSelectedConnection] = useState<Connection | undefined>(defaultConnection);

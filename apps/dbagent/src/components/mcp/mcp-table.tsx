@@ -175,16 +175,37 @@ export function McpTable() {
           </p>
           <div className="grid grid-cols-3 gap-3">
             <div>
-              <label className="mb-1 block text-sm font-medium">Name</label>
-              <Input placeholder="postgres-mcp" value={extName} onChange={(e) => setExtName(e.target.value)} />
+              <label htmlFor="mcp-ext-name" className="mb-1 block text-sm font-medium">
+                Name
+              </label>
+              <Input
+                id="mcp-ext-name"
+                placeholder="postgres-mcp"
+                value={extName}
+                onChange={(e) => setExtName(e.target.value)}
+              />
             </div>
             <div>
-              <label className="mb-1 block text-sm font-medium">Command</label>
-              <Input placeholder="uvx" value={extCommand} onChange={(e) => setExtCommand(e.target.value)} />
+              <label htmlFor="mcp-ext-command" className="mb-1 block text-sm font-medium">
+                Command
+              </label>
+              <Input
+                id="mcp-ext-command"
+                placeholder="uvx"
+                value={extCommand}
+                onChange={(e) => setExtCommand(e.target.value)}
+              />
             </div>
             <div>
-              <label className="mb-1 block text-sm font-medium">Args (space-separated)</label>
-              <Input placeholder="postgres-mcp" value={extArgs} onChange={(e) => setExtArgs(e.target.value)} />
+              <label htmlFor="mcp-ext-args" className="mb-1 block text-sm font-medium">
+                Args (space-separated)
+              </label>
+              <Input
+                id="mcp-ext-args"
+                placeholder="postgres-mcp"
+                value={extArgs}
+                onChange={(e) => setExtArgs(e.target.value)}
+              />
             </div>
           </div>
           <div className="flex justify-end gap-2">

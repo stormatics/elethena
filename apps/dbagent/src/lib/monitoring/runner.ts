@@ -30,8 +30,7 @@ async function runModelPlaybook({
   schedule,
   playbook,
   additionalInstructions,
-  project,
-  dbAccess
+  project
 }: RunModelPlaybookParams) {
   messages.push({
     id: generateId(),
